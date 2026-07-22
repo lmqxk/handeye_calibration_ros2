@@ -1,0 +1,16 @@
+# ── 手眼标定配置（适配 OAK-D + AgileX Piper 机械臂） ──────────────
+
+aruco_dictionary_name: "DICT_6X6_1000"
+aruco_marker_side_length: 0.150
+camera_calibration_parameters_filename: "oak_info.yaml"
+image_topic: "/oak/rgb/image_raw"
+aruco_marker_name: "aruco_marker"
+calculated_camera_optical_frame_name: "oak_rgb_camera_optical_frame"
+marker_data_file_name: "resource/marker_data_oak.yaml"
+image_filename: "resource/marker_pose_oak_{pose_count}.jpg"
+robot_data_file_name: "resource/robot_data_oak.yaml"
+handeye_result_file_name: "resource/handeye_result_oak.yaml"
+handeye_result_profile_file_name: "resource/handeye_result_oak_profile.yaml"
+base_link: "base_link"
+ee_link: "link6"
+world_frame: "base_link"

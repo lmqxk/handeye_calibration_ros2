@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+**/marker_pose_oak_*.jpg
+*.bak
