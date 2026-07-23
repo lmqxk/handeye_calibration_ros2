@@ -24,8 +24,12 @@ class TransformPublisher(Node):
     def __init__(self):
         super().__init__('transform_publisher')
 
+        # 相机选择参数：oak / realsense
+        self.declare_parameter('camera', 'oak')
+        camera = self.get_parameter('camera').value
+
         self._pkg_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        config_path = os.path.join(self._pkg_dir, 'config.yaml')
+        config_path = os.path.join(self._pkg_dir, f'config_{camera}.yaml')
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         self.handeye_result_file_name = os.path.join(self._pkg_dir, config["handeye_result_file_name"])

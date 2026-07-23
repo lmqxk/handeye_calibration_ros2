@@ -47,9 +47,13 @@ class ArucoNode(Node):
     def __init__(self):
         super().__init__('aruco_node')
 
+        # 相机选择参数：oak / realsense
+        self.declare_parameter('camera', 'oak')
+        camera = self.get_parameter('camera').value
+
         # 用脚本真实路径定位包目录（兼容 ros2 run，不受 CWD 影响）
         self._pkg_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        config_path = os.path.join(self._pkg_dir, 'config.yaml')
+        config_path = os.path.join(self._pkg_dir, f'config_{camera}.yaml')
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         aruco_dictionary_name = config["aruco_dictionary_name"]

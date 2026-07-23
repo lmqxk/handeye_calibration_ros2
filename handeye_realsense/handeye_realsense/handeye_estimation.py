@@ -17,8 +17,12 @@ class HandEyeCalibrationNode(Node):
         super().__init__('hand_eye_calibration_node')
         self.get_logger().info("Starting Hand-Eye Calibration Node")
 
+        # 相机选择参数：oak / realsense
+        self.declare_parameter('camera', 'oak')
+        camera = self.get_parameter('camera').value
+
         self._pkg_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        config_path = os.path.join(self._pkg_dir, 'config.yaml')
+        config_path = os.path.join(self._pkg_dir, f'config_{camera}.yaml')
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         self.robot_data_file_name = os.path.join(self._pkg_dir, config["robot_data_file_name"])
@@ -35,6 +39,43 @@ class HandEyeCalibrationNode(Node):
         # Load transformation data from YAML files
         self.R_gripper2base, self.t_gripper2base = self.load_transformations(self.robot_data_file_name)
         self.R_target2cam, self.t_target2cam = self.load_transformations(self.marker_data_file_name)
+
+        robot_count = len(self.R_gripper2base)
+        marker_count = len(self.R_target2cam)
+        self.get_logger().info(f"机器人数据: {robot_count} 组")
+        self.get_logger().info(f"标定板数据: {marker_count} 组")
+
+        if robot_count != marker_count:
+            self.get_logger().warn(
+                f"两组数据数量不一致 ({robot_count} vs {marker_count})，"
+                f"自动取前 {min(robot_count, marker_count)} 组对齐")
+            # 按顺序取最小数量（数据按采集顺序保存，前 N 组对应）
+            n = min(robot_count, marker_count)
+            self.R_gripper2base = self.R_gripper2base[:n]
+            self.t_gripper2base = self.t_gripper2base[:n]
+            self.R_target2cam = self.R_target2cam[:n]
+            self.t_target2cam = self.t_target2cam[:n]
+
+        pairs = len(self.R_gripper2base)
+        self.get_logger().info(f"有效标定组数: {pairs}")
+
+        if pairs < 5:
+            self.get_logger().error(
+                f"有效数据仅 {pairs} 组，严重不足！需要至少 5 组。请重新采集")
+            rclpy.shutdown()
+            return
+        elif pairs < 8:
+            self.get_logger().warn(
+                f"有效数据 {pairs} 组，偏少（建议 ≥ 8 组），可以尝试计算但结果可能不稳定")
+        else:
+            self.get_logger().info(
+                f"有效数据 {pairs} 组，足够计算 ✅")
+
+        # 检查是否有旧数据混合的迹象
+        if robot_count > pairs * 1.5 or marker_count > pairs * 1.5:
+            self.get_logger().warn(
+                "原始数据量远大于有效组数，可能有旧数据残留在文件中。"
+                "如需清理，删除对应 resource/*.yaml 数据文件后重新采集")
 
         # Compute the hand-eye transformation matrix
         self.compute_hand_eye()

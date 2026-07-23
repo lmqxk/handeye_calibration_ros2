@@ -15,8 +15,13 @@
 | **新增** | `auto_calibrate.py` | 自动走到 18 个预设位姿，到位后自动保存，无需手动按键 |
 | **新增** | `tcp_tf_bridge.py` | 发布 `base_link → link6` TF（从 TCP 实时反馈读取） |
 | **新增** | `scripts/convert_camera_info.py` | OAK-D camera_info → OpenCV FileStorage 格式转换 |
-| **新增** | `oak_info.yaml` | OAK-D 相机内参（OpenCV 格式） |
+| **新增** | `config_realsense.yaml` | RealSense D415 标定配置（topic、frame_id、数据文件） |
+| **新增** | `realsense_info.yaml` | RealSense D415 相机内参（OpenCV 格式） |
 | **修改** | `config.yaml` | 适配 OAK-D topic、frame_id、ArUco 字典 |
+| **修改** | `aruco_estimation.py` | 支持 `camera:=realsense` 参数切换配置 |
+| **修改** | `robot_state_piper.py` | 同上 |
+| **修改** | `handeye_estimation.py` | 同上 |
+| **修改** | `publish_eye2hand.py` | 同上 |
 | **修改** | `aruco_estimation.py` | OAK-D 图像格式适配 |
 | **修改** | `handeye_estimation.py` | 标定计算兼容优化 |
 | **修改** | `publish_eye2hand.py` | frame_id 适配 Piper |
@@ -41,8 +46,16 @@
 
 ### TF 验证
 
-```
+```bash
+# OAK-D
 ros2 run tf2_ros tf2_echo base_link oak_rgb_camera_optical_frame
+
+# RealSense
+ros2 run tf2_ros tf2_echo base_link camera_color_optical_frame
+```
+
+OAK-D 标定结果示例：
+```
 - Translation: [0.107, 0.008, 0.265]
 ```
 
@@ -51,7 +64,7 @@ ros2 run tf2_ros tf2_echo base_link oak_rgb_camera_optical_frame
 | 组件 | 型号 |
 |------|------|
 | 机械臂 | AgileX PiPER 6-DOF + 夹爪 |
-| 相机 | OAK-D（eye-in-hand 安装） |
+| 相机 | OAK-D 或 RealSense D415（eye-in-hand 安装） |
 | 标定板 | ArUco 6×6, ID 365, 150mm |
 | 主控 | Unitree Go2 NX 核心板 |
 | OS | Ubuntu 22.04, ROS2 Humble |
@@ -71,7 +84,7 @@ source install/setup.bash
 
 ## 快速使用
 
-### 自动采集（推荐）
+### OAK-D 标定
 
 ```bash
 # 终端 1: 机械臂驱动
@@ -90,10 +103,35 @@ ros2 run handeye_realsense aruco            # 标签页 B
 ros2 run handeye_realsense auto_calibrate
 ```
 
+### RealSense D415 标定
+
+所有节点加 `--ros-args -p camera:=realsense` 参数：
+
+```bash
+# 终端 1: 机械臂驱动（同 OAK-D）
+ros2 launch agx_arm_ctrl start_single_agx_arm.launch.py \
+    arm_type:=piper auto_enable:=true effector_type:=agx_gripper
+
+# 终端 2: RealSense D415 相机
+ros2 launch realsense2_camera rs_launch.py \
+    align_depth.enable:=false color_fps:=30
+
+# 终端 3: 标定节点（两个标签页）
+source ~/handeye_ws/install/setup.bash
+ros2 run handeye_realsense robot_piper --ros-args -p camera:=realsense
+ros2 run handeye_realsense aruco --ros-args -p camera:=realsense
+
+# 终端 4: 自动采集（auto_calibrate 不读 config，无需加参数）
+ros2 run handeye_realsense auto_calibrate
+```
+
+> **OAK-D 与 RealSense 差异**：标定节点的 `camera` 参数默认 `oak`，设为 `realsense` 后加载 `config_realsense.yaml`，自动切换 image topic（`/camera/color/image_raw`）、camera 内参文件（`realsense_info.yaml`）、光学 frame ID（`camera_color_optical_frame`）和输出数据文件（`resource/*_realsense.*`），两套数据互不干扰。
+
 ### 计算标定结果
 
 ```bash
-ros2 run handeye_realsense handeye
+ros2 run handeye_realsense handeye                          # OAK-D 默认
+ros2 run handeye_realsense handeye --ros-args -p camera:=realsense   # RealSense
 ```
 
 ### 发布 TF
@@ -102,8 +140,9 @@ ros2 run handeye_realsense handeye
 # base_link → link6（从 /feedback/tcp_pose 读取）
 ros2 run handeye_realsense tcp_tf_bridge &
 
-# link6 → camera（标定结果）
-ros2 run handeye_realsense eye2hand
+# link6 → camera（标定结果，RealSense 需加 camera:=realsense）
+ros2 run handeye_realsense eye2hand                         # OAK-D 默认
+ros2 run handeye_realsense eye2hand --ros-args -p camera:=realsense   # RealSense
 ```
 
 ## 许可证

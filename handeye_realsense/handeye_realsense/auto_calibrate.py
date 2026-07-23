@@ -24,12 +24,27 @@ from std_msgs.msg import String
 from rclpy.duration import Duration
 from std_srvs.srv import SetBool
 import numpy as np
+import yaml
+import os
 import time
 
 
 class AutoCalibrateNode(Node):
     def __init__(self):
         super().__init__('auto_calibrate_node')
+
+        # 相机选择参数：oak / realsense
+        self.declare_parameter('camera', 'oak')
+        self._camera = self.get_parameter('camera').value
+        self.get_logger().info(f"📷 相机模式: {self._camera}")
+
+        # 加载配置，确定数据文件路径（用于启动时清空）
+        pkg_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        config_path = os.path.join(pkg_dir, f'config_{self._camera}.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        self._robot_data_file = os.path.join(pkg_dir, config["robot_data_file_name"])
+        self._marker_data_file = os.path.join(pkg_dir, config["marker_data_file_name"])
 
         # 发布器
         self.joint_pub = self.create_publisher(JointState, '/control/move_j', 10)
@@ -42,8 +57,11 @@ class AutoCalibrateNode(Node):
         self.tcp_sub = self.create_subscription(
             PoseStamped, '/feedback/tcp_pose', self.tcp_callback, 10)
 
-        # 位姿列表
-        self.poses = self._generate_poses()
+        # 位姿列表（按相机类型选择）
+        if self._camera == 'realsense':
+            self.poses = self._generate_poses_realsense()
+        else:
+            self.poses = self._generate_poses()
         self.total_poses = len(self.poses)
         self.current_pose_idx = -1  # 尚未开始
         self.completed = False      # 是否正常跑完全流程
@@ -110,8 +128,70 @@ class AutoCalibrateNode(Node):
             poses.append(joint_pos + [gripper])  # 加夹爪 = 7 元素
         return poses
 
+    def _generate_poses_realsense(self) -> list:
+        """RealSense 专用位姿：起始于零点，+j5 俯角看桌面标定板"""
+        # j1=base, j2=shoulder, j3=elbow, j4/5/6=wrist
+        # +j5 = 俯（低头看桌面），-j5 = 仰（抬头看天）
+        base = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        gripper = 0.08
+
+        offsets = [
+            # ── 第 1 组：中心，逐步低头 ──
+            [0.00,  0.00,  0.00,  0.00,  0.00,  0.00],  # 1 零点起始
+            [0.00,  0.15, -0.10,  0.00,  0.15,  0.00],  # 2 稍低
+            [0.00,  0.25, -0.15,  0.00,  0.25,  0.00],  # 3 更低
+            [0.00,  0.35, -0.20,  0.00,  0.20,  0.00],  # 4 再低
+            [0.00,  0.20, -0.10,  0.00,  0.20,  0.00],  # 5 中距离
+
+            # ── 第 2 组：左右平移 ──
+            [0.10,  0.25, -0.18,  0.00,  0.28,  0.00],  # 6 右
+            [-0.10,  0.25, -0.18,  0.00,  0.28,  0.00],  # 7 左
+            [0.15,  0.30, -0.20,  0.00,  0.30,  0.00],  # 8 右+远
+            [-0.15,  0.30, -0.20,  0.00,  0.30,  0.00],  # 9 左+远
+
+            # ── 第 3 组：倾斜角度 ──
+            [0.08,  0.25, -0.15,  0.10,  0.25,  0.00],  # 10 右+滚
+            [-0.08,  0.25, -0.15, -0.10,  0.25,  0.00],  # 11 左+滚
+            [0.00,  0.20, -0.15,  0.00,  0.20,  0.10],  # 12 俯仰
+            [0.00,  0.25, -0.15,  0.00,  0.25, -0.10],  # 13 偏航
+
+            # ── 第 4 组：组合 ──
+            [0.08,  0.28, -0.18,  0.08,  0.26,  0.05],  # 14 右+下+滚+偏
+            [-0.08,  0.25, -0.18, -0.05,  0.32,  0.00],  # 15 左+下（减少偏转）
+            [0.05,  0.20, -0.10,  0.00,  0.22,  0.05],  # 16 保守 1
+            [-0.05,  0.20, -0.10,  0.00,  0.22, -0.05],  # 17 保守 2
+            [0.00,  0.35, -0.25,  0.00,  0.25,  0.00],  # 18 最大低头
+
+            # ── 第 19：回到零点 ──
+            [0.00,  0.00,  0.00,  0.00,  0.00,  0.00],  # 19 回到零点
+        ]
+
+        poses = []
+        for off in offsets:
+            joint_pos = [b + o for b, o in zip(base, off)]
+            poses.append(joint_pos + [gripper])
+        return poses
+
+    def _clear_data_files(self):
+        """启动时清空历史数据文件，确保每次采集从干净的列表开始"""
+        empty = {'poses': []}
+        try:
+            with open(self._robot_data_file, 'w') as f:
+                yaml.safe_dump(empty, f)
+            self.get_logger().info(f"🗑️  已清空机器人数据: {self._robot_data_file}")
+        except Exception as e:
+            self.get_logger().warn(f"⚠️  清空机器人数据文件失败: {e}")
+
+        try:
+            with open(self._marker_data_file, 'w') as f:
+                yaml.safe_dump(empty, f)
+            self.get_logger().info(f"🗑️  已清空标定板数据: {self._marker_data_file}")
+        except Exception as e:
+            self.get_logger().warn(f"⚠️  清空标定板数据文件失败: {e}")
+
     def start(self):
-        """开始自动采集"""
+        """开始自动采集（启动时先清空旧数据）"""
+        self._clear_data_files()
         self.get_logger().info("=" * 50)
         self.get_logger().info("🤖 自动手眼标定开始")
         self.get_logger().info(f"📋 共 {self.total_poses} 个位姿")

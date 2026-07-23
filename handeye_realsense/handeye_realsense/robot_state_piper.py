@@ -21,9 +21,13 @@ class RobotStatePiperNode(Node):
     def __init__(self):
         super().__init__('robot_state_piper_node')
 
+        # 相机选择参数：oak / realsense
+        self.declare_parameter('camera', 'oak')
+        camera = self.get_parameter('camera').value
+
         # 用脚本真实路径定位包目录
         self._pkg_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        config_path = os.path.join(self._pkg_dir, 'config.yaml')
+        config_path = os.path.join(self._pkg_dir, f'config_{camera}.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         self.robot_data_file_name = os.path.join(self._pkg_dir, config["robot_data_file_name"])
